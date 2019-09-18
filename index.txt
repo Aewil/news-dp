@@ -1,0 +1,149 @@
+const request = require('request');
+const cheerio = require('cheerio');
+
+class Website {
+
+    constructor(id, name, url, type) {
+        this.id = id;
+        this.name = name;
+        this.url = url;
+        this.type = type;
+        this.articles = [];
+    }
+
+    sendArticlesToDb() {
+        console.log(this.articles);
+    }
+
+    pushArticleIntoArticles(article) {
+        this.articles.push(article);
+    }
+
+
+
+}
+
+class LooopingsWebsite extends Website {
+
+    constructor(id, name, url, type) {
+        super(id, name, url, type);
+    }
+
+    fetchArticlesLooopings(index, $) {
+
+        let articleImage = $('#indexVak #indexItem').eq(index).find('a img').attr('src');
+
+        let articleTitle = $('#indexVak #indexItem').eq(index).find('#indexItemtitel h1 a').text();
+
+        let articleUrl = $('#indexVak #indexItem').eq(index).find('#indexItemfoto a').attr('href');
+
+        let articleDateHour = formatDate($('#indexVak #indexItem').eq(index).find('#indexItemtitel #dateline .left h4').text());
+
+
+        return(new Article(1, articleUrl, articleTitle, articleImage, articleDateHour));
+
+    }
+
+    fetchDataAndPopulateArticles() {
+
+        return new Promise( (resolve, reject) => {
+
+            request(this.url, (error, response, body) => {
+
+                const $ = cheerio.load(body);
+
+                // Premier article
+
+                let articleImage = $('#indexVak #indexTopitem').find('a .top').attr('src');
+                let articleTitle = $('#indexVak #indexTopitem').find('.indexTopitemfoto h1').text();
+                let articleUrl = $('#indexVak #indexTopitem a').attr('href');
+                let articleDateHour = formatDate($('#indexVak #indexTopitem #dateline h4').text());
+
+                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+
+                // Second article
+
+                articleImage = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('#indexBlockclip a .top').attr('src');
+                articleTitle = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('.indexBlockitemfoto h1').text();
+                articleUrl = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('a').attr('href');
+                articleDateHour = formatDate($('#indexVak #indexBlock .indexBlockitem').eq(0).find('#dateline .left h4').text());
+
+                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+
+                // Troisième article
+
+                articleImage = $('#indexBlock .indexBlockitem').eq(1).find('a .top').attr('src');
+                articleTitle = $('#indexBlock .indexBlockitem').eq(1).find('.indexBlockitemfoto h1').text();
+                articleUrl = $('#indexBlock .indexBlockitem').eq(1).find('a').attr('href');
+                articleDateHour = formatDate($('#indexBlock .indexBlockitem').eq(1).find('#dateline .left h4').text());
+
+                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+
+                $('#indexVak #indexItem').map( index => {
+                    looopings.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
+                });
+
+                resolve(null);
+
+            });
+        });
+    }
+
+}
+
+class Article {
+
+    constructor(websiteId, url, title, image, dateHour) {
+        this.websiteId = websiteId;
+        this.url = url;
+        this.title = title;
+        this.image = image;
+        this.dateHour = dateHour;
+    }
+
+}
+
+function formatDate(dateParam) {
+
+    if (dateParam.includes('Gisteren')) {
+
+        hour = dateParam.replace('Gisteren, ', '').replace(' uur', '');
+
+        date = new Date();
+
+        date.setDate(date.getDate() - 1);
+
+        date.setHours(hour.substr(0, 2));
+        date.setMinutes(hour.substr(3, 2));
+
+    } else if (dateParam.includes('Vandaag')) {
+
+        hour = dateParam.replace('Vandaag, ', '').replace(' uur', '');
+
+        date = new Date();
+
+        date.setHours(hour.substr(0, 2));
+        date.setMinutes(hour.substr(3, 2));
+
+    } else {
+
+        dateFormatDay = dateParam.substr(0, 2);
+        dateFormatMonth = dateParam.substr(3, 2);
+        dateFormatYear = dateParam.substr(6, 4);
+        dateFormatHourMinutes = dateParam.substr(12, 5);
+
+        dateToFormat = (dateFormatYear + '-' + dateFormatMonth + '-' + dateFormatDay + 'T' + dateFormatHourMinutes + ':00');
+
+        date = new Date(dateToFormat);
+
+    }
+
+    return date;
+
+}
+
+looopings = new LooopingsWebsite(1, 'Looopings', 'https://www.looopings.nl/', 'looopings');
+
+looopings.fetchDataAndPopulateArticles().then(() => {
+    looopings.sendArticlesToDb();
+});
