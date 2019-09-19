@@ -11,13 +11,14 @@ var con = mysql.createConnection({
 
 con.connect();
 
+var websites = [];
+
 class Website {
 
-    constructor(id, name, url, type) {
+    constructor(id, name, url) {
         this.id = id;
         this.name = name;
         this.url = url;
-        this.type = type;
         this.articles = [];
     }
 
@@ -31,14 +32,14 @@ class Website {
                 sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
             }
 
-        })
+        });
 
-        console.log(sql);
+        console.log(this.name + ' OK !');
 
-        con.query(sql, (err, result) => {
+        /* con.query(sql, (err, result) => {
             if (err) throw err;
             console.log(this.name + ' OK !');
-        });
+        }); */
     }
 
     pushArticleIntoArticles(article) {
@@ -49,8 +50,8 @@ class Website {
 
 class LooopingsWebsite extends Website {
 
-    constructor(id, name, url, type) {
-        super(id, name, url, type);
+    constructor(id, name, url) {
+        super(id, name, url);
     }
 
     formatDate(dateParam) {
@@ -124,7 +125,7 @@ class LooopingsWebsite extends Website {
                 let articleUrl = $('#indexVak #indexTopitem a').attr('href');
                 let articleDateHour = this.formatDate($('#indexVak #indexTopitem #dateline h4').text());
 
-                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+                this.pushArticleIntoArticles(new Article(this.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
                 // Second article
 
@@ -133,7 +134,7 @@ class LooopingsWebsite extends Website {
                 articleUrl = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('a').attr('href');
                 articleDateHour = this.formatDate($('#indexVak #indexBlock .indexBlockitem').eq(0).find('#dateline .left h4').text());
 
-                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+                this.pushArticleIntoArticles(new Article(this.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
                 // Troisième article
 
@@ -142,10 +143,10 @@ class LooopingsWebsite extends Website {
                 articleUrl = $('#indexBlock .indexBlockitem').eq(1).find('a').attr('href');
                 articleDateHour = this.formatDate($('#indexBlock .indexBlockitem').eq(1).find('#dateline .left h4').text());
 
-                looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
+                this.pushArticleIntoArticles(new Article(this.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
                 $('#indexVak #indexItem').map(index => {
-                    looopings.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
+                    this.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
                 });
 
                 resolve(null);
@@ -168,8 +169,22 @@ class Article {
 
 }
 
-looopings = new LooopingsWebsite(1, 'Looopings', 'https://www.looopings.nl/', 'looopings');
 
-looopings.fetchDataAndPopulateArticles().then(() => {
-    looopings.sendArticlesToDb();
+con.query('SELECT * from website', (err, results) => {
+    if (err) throw err;
+
+    results.map(item => {
+        switch (item.type) {
+            case 'looopings':
+                websites.push(new LooopingsWebsite(item.id, item.name, item.url));
+                break;
+        }
+    })
+
+    websites.map(website => {
+        website.fetchDataAndPopulateArticles().then(() => {
+            website.sendArticlesToDb();
+        });
+    });
+
 });
