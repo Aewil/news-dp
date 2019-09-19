@@ -1,5 +1,15 @@
 const request = require('request');
 const cheerio = require('cheerio');
+const mysql = require('mysql');
+
+var con = mysql.createConnection({
+    host: "localhost",
+    user: "root",
+    password: "",
+    database: 'news_dimensionparcs'
+});
+
+con.connect();
 
 class Website {
 
@@ -12,14 +22,28 @@ class Website {
     }
 
     sendArticlesToDb() {
-        console.log(this.articles);
+        let sql = 'INSERT INTO articles VALUES '
+
+        this.articles.map((article, index) => {
+            if (index !== this.articles.length - 1) {
+                sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '"),'
+            } else {
+                sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
+            }
+
+        })
+
+        console.log(sql);
+
+        con.query(sql, (err, result) => {
+            if (err) throw err;
+            console.log(this.name + ' OK !');
+        });
     }
 
     pushArticleIntoArticles(article) {
         this.articles.push(article);
     }
-
-
 
 }
 
@@ -27,6 +51,47 @@ class LooopingsWebsite extends Website {
 
     constructor(id, name, url, type) {
         super(id, name, url, type);
+    }
+
+    formatDate(dateParam) {
+
+        let date;
+
+        if (dateParam.includes('Gisteren')) {
+
+            let hour = dateParam.replace('Gisteren, ', '').replace(' uur', '');
+
+            date = new Date();
+
+            date.setDate(date.getDate() - 1);
+
+            date.setHours(hour.substr(0, 2));
+            date.setMinutes(hour.substr(3, 2));
+
+        } else if (dateParam.includes('Vandaag')) {
+
+            let hour = dateParam.replace('Vandaag, ', '').replace(' uur', '');
+
+            date = new Date();
+
+            date.setHours(hour.substr(0, 2));
+            date.setMinutes(hour.substr(3, 2));
+
+        } else {
+
+            let dateFormatDay = dateParam.substr(0, 2);
+            let dateFormatMonth = dateParam.substr(3, 2);
+            let dateFormatYear = dateParam.substr(6, 4);
+            let dateFormatHourMinutes = dateParam.substr(12, 5);
+
+            let dateToFormat = (dateFormatYear + '-' + dateFormatMonth + '-' + dateFormatDay + 'T' + dateFormatHourMinutes + ':00');
+
+            date = new Date(dateToFormat);
+
+        }
+
+        return date;
+
     }
 
     fetchArticlesLooopings(index, $) {
@@ -37,16 +102,16 @@ class LooopingsWebsite extends Website {
 
         let articleUrl = $('#indexVak #indexItem').eq(index).find('#indexItemfoto a').attr('href');
 
-        let articleDateHour = formatDate($('#indexVak #indexItem').eq(index).find('#indexItemtitel #dateline .left h4').text());
+        let articleDateHour = this.formatDate($('#indexVak #indexItem').eq(index).find('#indexItemtitel #dateline .left h4').text());
 
 
-        return(new Article(1, articleUrl, articleTitle, articleImage, articleDateHour));
+        return (new Article(1, articleUrl, articleTitle, articleImage, articleDateHour));
 
     }
 
     fetchDataAndPopulateArticles() {
 
-        return new Promise( (resolve, reject) => {
+        return new Promise((resolve, reject) => {
 
             request(this.url, (error, response, body) => {
 
@@ -57,7 +122,7 @@ class LooopingsWebsite extends Website {
                 let articleImage = $('#indexVak #indexTopitem').find('a .top').attr('src');
                 let articleTitle = $('#indexVak #indexTopitem').find('.indexTopitemfoto h1').text();
                 let articleUrl = $('#indexVak #indexTopitem a').attr('href');
-                let articleDateHour = formatDate($('#indexVak #indexTopitem #dateline h4').text());
+                let articleDateHour = this.formatDate($('#indexVak #indexTopitem #dateline h4').text());
 
                 looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
@@ -66,7 +131,7 @@ class LooopingsWebsite extends Website {
                 articleImage = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('#indexBlockclip a .top').attr('src');
                 articleTitle = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('.indexBlockitemfoto h1').text();
                 articleUrl = $('#indexVak #indexBlock .indexBlockitem').eq(0).find('a').attr('href');
-                articleDateHour = formatDate($('#indexVak #indexBlock .indexBlockitem').eq(0).find('#dateline .left h4').text());
+                articleDateHour = this.formatDate($('#indexVak #indexBlock .indexBlockitem').eq(0).find('#dateline .left h4').text());
 
                 looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
@@ -75,11 +140,11 @@ class LooopingsWebsite extends Website {
                 articleImage = $('#indexBlock .indexBlockitem').eq(1).find('a .top').attr('src');
                 articleTitle = $('#indexBlock .indexBlockitem').eq(1).find('.indexBlockitemfoto h1').text();
                 articleUrl = $('#indexBlock .indexBlockitem').eq(1).find('a').attr('href');
-                articleDateHour = formatDate($('#indexBlock .indexBlockitem').eq(1).find('#dateline .left h4').text());
+                articleDateHour = this.formatDate($('#indexBlock .indexBlockitem').eq(1).find('#dateline .left h4').text());
 
                 looopings.pushArticleIntoArticles(new Article(looopings.id, articleUrl, articleTitle, articleImage, articleDateHour));
 
-                $('#indexVak #indexItem').map( index => {
+                $('#indexVak #indexItem').map(index => {
                     looopings.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
                 });
 
@@ -100,45 +165,6 @@ class Article {
         this.image = image;
         this.dateHour = dateHour;
     }
-
-}
-
-function formatDate(dateParam) {
-
-    if (dateParam.includes('Gisteren')) {
-
-        hour = dateParam.replace('Gisteren, ', '').replace(' uur', '');
-
-        date = new Date();
-
-        date.setDate(date.getDate() - 1);
-
-        date.setHours(hour.substr(0, 2));
-        date.setMinutes(hour.substr(3, 2));
-
-    } else if (dateParam.includes('Vandaag')) {
-
-        hour = dateParam.replace('Vandaag, ', '').replace(' uur', '');
-
-        date = new Date();
-
-        date.setHours(hour.substr(0, 2));
-        date.setMinutes(hour.substr(3, 2));
-
-    } else {
-
-        dateFormatDay = dateParam.substr(0, 2);
-        dateFormatMonth = dateParam.substr(3, 2);
-        dateFormatYear = dateParam.substr(6, 4);
-        dateFormatHourMinutes = dateParam.substr(12, 5);
-
-        dateToFormat = (dateFormatYear + '-' + dateFormatMonth + '-' + dateFormatDay + 'T' + dateFormatHourMinutes + ':00');
-
-        date = new Date(dateToFormat);
-
-    }
-
-    return date;
 
 }
 
