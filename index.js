@@ -23,23 +23,39 @@ class Website {
     }
 
     sendArticlesToDb() {
-        let sql = 'INSERT INTO articles VALUES '
 
-        this.articles.map((article, index) => {
-            if (index !== this.articles.length - 1) {
-                sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '"),'
-            } else {
-                sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
-            }
+        if (this.articles[0]) {
 
-        });
+            con.query('SELECT * FROM articles WHERE idwebsite = "' + this.websiteId + '";', (err, results) => {
 
-        console.log(this.name + ' OK !');
+                if (err) throw err;
+                let sql = 'INSERT INTO articles VALUES '
 
-        /* con.query(sql, (err, result) => {
-            if (err) throw err;
-            console.log(this.name + ' OK !');
-        }); */
+                this.articles.map((article, index) => {
+
+                    let findIfAlreadyExists = results.filter(result => result.name === article.name)
+
+                    if (!findIfAlreadyExists[0]) {
+                        if (index !== this.articles.length - 1) {
+                            sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '"),'
+                        } else {
+                            sql = sql + '(DEFAULT, "' + 1 + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
+                        }
+                    }
+
+                });
+
+                con.query(sql, (err) => {
+                    if (err) throw err;
+                    console.log(this.name + ' OK !');
+                });
+            });
+
+
+        } else {
+            console.log('No articles for ' + this.name);
+        }
+
     }
 
     pushArticleIntoArticles(article) {
@@ -112,7 +128,7 @@ class LooopingsWebsite extends Website {
 
     fetchDataAndPopulateArticles() {
 
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
 
             request(this.url, (error, response, body) => {
 
@@ -157,6 +173,71 @@ class LooopingsWebsite extends Website {
 
 }
 
+class WordpressWebsite extends Website {
+
+    constructor(id, name, url) {
+        super(id, name, url);
+    }
+
+    requester(iteration) {
+
+        return new Promise((resolve, reject) => {
+
+            request(this.url + '/wp-json/wp/v2/posts?_embed&page=' + iteration, (err, response, body) => {
+
+                console.log(this.name + ' Page ' + iteration);
+
+                try {
+
+                    body = JSON.parse(body);
+
+                    if (body.code === 'rest_post_invalid_page_number') {
+                        reject();
+                    } else {
+                        body.map(item => {
+                            this.pushArticleIntoArticles(new Article(this.id, item.link, item.title.rendered, item._embedded['wp:featuredmedia']['0'].source_url, item.modified))
+                        });
+                        resolve();
+                    }
+
+                } catch (error) {
+                    reject();
+                }
+
+            });
+
+        });
+
+    }
+
+    fetchDataAndPopulateArticles() {
+
+        return new Promise(async (resolve) => {
+
+            let iteration = 1;
+
+            await this.whileForTheWin(iteration);
+
+            resolve();
+
+        });
+
+    }
+
+    async whileForTheWin(iteration) {
+        while (iteration !== 0) {
+            await this.requester(iteration)
+                .then(() => {
+                    iteration = iteration + 1;
+                })
+                .catch(() => {
+                    iteration = 0;
+                });
+        }
+    }
+
+}
+
 class Article {
 
     constructor(websiteId, url, title, image, dateHour) {
@@ -169,6 +250,7 @@ class Article {
 
 }
 
+var blackList = ['WDWNT', 'Attractions Magazine', 'Blog Mickey', 'ED92'];
 
 con.query('SELECT * from website', (err, results) => {
     if (err) throw err;
@@ -176,15 +258,20 @@ con.query('SELECT * from website', (err, results) => {
     results.map(item => {
         switch (item.type) {
             case 'looopings':
-                websites.push(new LooopingsWebsite(item.id, item.name, item.url));
+                //websites.push(new LooopingsWebsite(item.id, item.name, item.url));
+                break;
+            case 'wordpress':
+                websites.push(new WordpressWebsite(item.id, item.name, item.url));
                 break;
         }
     })
 
     websites.map(website => {
-        website.fetchDataAndPopulateArticles().then(() => {
-            website.sendArticlesToDb();
-        });
+        if (!blackList.includes(website.name)) {
+            website.fetchDataAndPopulateArticles().then(() => {
+                website.sendArticlesToDb();
+            });
+        }
     });
 
 });
