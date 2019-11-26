@@ -11,14 +11,16 @@ const logger = winston.createLogger({
 
 var con = mysql.createConnection({
     host: "localhost",
+    port: "8889",
     user: "root",
-    password: "",
+    password: "root",
     database: 'news_dimensionparcs'
 });
 
 con.connect();
 
-var websites = [];
+var websites = new Array();
+maxPageRefresh = true;
 
 class Website {
 
@@ -26,7 +28,7 @@ class Website {
         this.id = id;
         this.name = name;
         this.url = url;
-        this.articles = [];
+        this.articles = new Array();
     }
 
     sendArticlesToDb() {
@@ -36,6 +38,7 @@ class Website {
             con.query('SELECT * FROM articles WHERE idwebsite = "' + this.id + '";', (err, results) => {
 
                 if (err) throw err;
+
                 let sql = 'INSERT INTO articles VALUES '
 
                 this.articles.map((article, index) => {
@@ -58,7 +61,7 @@ class Website {
 
                     con.query(sql, (err) => {
                         if (err) throw sql + '\n' + err;
-                        //logger.info(this.name + ' OK !');
+                        logger.info(this.name + ' OK !');
                     });
                 } else {
                     logger.info('Aucun nouvel article pour ' + this.name);
@@ -143,7 +146,7 @@ class LooopingsWebsite extends Website {
 
     fetchDataAndPopulateArticles() {
 
-        return new Promise((resolve) => {
+        return new Promise(() => {
 
             request(this.url, (error, response, body) => {
 
@@ -180,7 +183,7 @@ class LooopingsWebsite extends Website {
                     this.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
                 });
 
-                resolve(null);
+                return;
 
             });
 
@@ -202,23 +205,27 @@ class WordpressWebsite extends Website {
 
             request(this.url + '/wp-json/wp/v2/posts?_embed&page=' + iteration, (err, response, body) => {
 
+                if (err) throw err;
+
                 logger.info(this.name + ' Page ' + iteration);
 
                 try {
-
                     body = JSON.parse(body);
-
-                    if (body.code === 'rest_post_invalid_page_number') {
-                        reject();
-                    } else {
-                        body.map(item => {
-                            this.pushArticleIntoArticles(new Article(this.id, item.link, item.title.rendered, item._embedded['wp:featuredmedia']['0'].source_url, item.modified))
-                        });
-                        resolve();
-                    }
-
                 } catch (error) {
-                    reject();
+                    reject('Page broken');
+                }
+
+                if (body.code === 'rest_post_invalid_page_number') {
+                    throw 'rest_post_invalid_page_number';
+                } else {
+                    body.forEach(item => {
+                        try {
+                            this.pushArticleIntoArticles(new Article(this.id, item.link, item.title.rendered, item._embedded['wp:featuredmedia']['0'].source_url, item.modified))
+                        } catch (err) {
+                            reject('Article not complete');
+                        }
+                    });
+                    return;
                 }
 
             });
@@ -227,34 +234,23 @@ class WordpressWebsite extends Website {
 
     }
 
-    fetchDataAndPopulateArticles() {
+    async fetchDataAndPopulateArticles() {
+        let iteration = 1;
 
-        return new Promise(async (resolve) => {
-
-            let iteration = 1;
-
-            await this.whileForTheWin(iteration);
-
-            resolve();
-
-        });
-
-    }
-
-    async whileForTheWin(iteration) {
         while (iteration !== 0) {
 
-            if (maxEngaged && iteration === 6) {
+            if (maxPageRefresh && iteration === 6) {
                 break;
             }
 
-            await this.requester(iteration)
-                .then(() => {
-                    iteration = iteration + 1;
-                })
-                .catch(() => {
-                    iteration = 0;
-                });
+            try {
+                await this.requester(iteration);
+                iteration = iteration + 1;
+            } catch(err) {
+                logger.info(err);
+                iteration = 0;
+            }
+
         }
     }
 
@@ -280,7 +276,7 @@ function dayRuntime() {
 
     let getCurrentHours = new Date();
 
-    timer = setInterval(() => {
+    let timer = setTimeout(() => {
 
         if (getCurrentHours.getHours() >= 4 && getCurrentHours.getHours() < 5 && alreadyDone !== getCurrentHours.getDate()) {
             nightRuntime();
@@ -289,7 +285,7 @@ function dayRuntime() {
 
         con.query('SELECT * from website', async (err, results) => {
 
-            maxEngaged = true;
+            maxPageRefresh = true;
 
             if (err) throw err;
 
@@ -304,12 +300,13 @@ function dayRuntime() {
                 }
             })
 
-            await websiteParsing().then(result => {
-                logger.info('Version de jour terminée !');
-            });
+            await websiteParsing();
+            logger.info('Version de jour terminée !');
+            dayRuntime();
 
         });
-    }, 30000);
+
+    }, 5000);
 
 }
 
@@ -317,7 +314,7 @@ function nightRuntime() {
 
     con.query('SELECT * from website', async (err, results) => {
 
-        maxEngaged = false;
+        maxPageRefresh = false;
 
         if (err) throw err;
 
@@ -332,11 +329,10 @@ function nightRuntime() {
             }
         });
 
-        await websiteParsing().then(result => {
-            alreadyDone = new Date().getDate();
-            logger.info('Version de nuit terminée !');
-            dayRuntime();
-        });
+        await websiteParsing();
+        alreadyDone = new Date().getDate();
+        logger.info('Version de nuit terminée !');
+        dayRuntime();
 
     });
 
@@ -346,9 +342,13 @@ async function websiteParsing() {
     return await Promise.all(
         websites.map(async (website) => {
             if (!blackList.includes(website.name)) {
-                await website.fetchDataAndPopulateArticles().then(() => {
+                try {
+                    await website.fetchDataAndPopulateArticles();
                     website.sendArticlesToDb();
-                });
+                    return;
+                } catch(err) {
+                    throw err;
+                }
             }
         })
     )
