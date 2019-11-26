@@ -9,7 +9,7 @@ const logger = winston.createLogger({
     ]
 });
 
-var con = mysql.createConnection({
+const con = mysql.createConnection({
     host: "localhost",
     user: "root",
     password: "",
@@ -263,18 +263,6 @@ class WordpressWebsite extends Website {
 
         });
 
-    }
-
-}
-
-class Article {
-
-    constructor(websiteId, url, title, image, dateHour) {
-        this.websiteId = websiteId;
-        this.url = url;
-        this.title = title;
-        this.image = image;
-        this.dateHour = dateHour;
     }
 
 }
