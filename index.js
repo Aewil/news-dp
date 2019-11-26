@@ -11,16 +11,16 @@ const logger = winston.createLogger({
 
 var con = mysql.createConnection({
     host: "localhost",
-    port: "8889",
     user: "root",
-    password: "root",
+    password: "",
     database: 'news_dimensionparcs'
 });
 
 con.connect();
 
-var websites = new Array();
-maxPageRefresh = true;
+let websites = [];
+let maxPageRefresh = 6;
+let alreadyDone = false;
 
 class Website {
 
@@ -28,51 +28,55 @@ class Website {
         this.id = id;
         this.name = name;
         this.url = url;
-        this.articles = new Array();
+        this.articles = [];
     }
 
     sendArticlesToDb() {
 
-        if (this.articles[0]) {
+        return new Promise(() => {
+            if (this.articles[0]) {
 
-            con.query('SELECT * FROM articles WHERE idwebsite = "' + this.id + '";', (err, results) => {
+                con.query('SELECT * FROM articles WHERE idwebsite = "' + this.id + '";', (err, results) => {
 
-                if (err) throw err;
+                    if (err) throw err;
 
-                let sql = 'INSERT INTO articles VALUES '
+                    let sqlStart = 'INSERT INTO articles VALUES ';
+                    let sqlRequest = sqlStart;
 
-                this.articles.map((article, index) => {
+                    this.articles.map((article, index) => {
 
-                    if (!results.filter(result => result.url === article.url)[0]) {
-                        if (index !== this.articles.length - 1) {
-                            sql = sql + '(DEFAULT, "' + this.id + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '"),'
-                        } else {
-                            sql = sql + '(DEFAULT, "' + this.id + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
+                        if (!results.filter(result => result.url === article.url)[0]) {
+                            if (index !== this.articles.length - 1) {
+                                sqlRequest = sqlRequest + '(DEFAULT, "' + this.id + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '"),'
+                            } else {
+                                sqlRequest = sqlRequest + '(DEFAULT, "' + this.id + '", "' + article.image + '", "' + article.dateHour + '", "' + article.url + '", "' + article.title + '");'
+                            }
                         }
+
+                    });
+
+                    if (sqlStart !== sqlRequest) {
+
+                        if (sqlRequest.substr(sqlRequest.length - 1, 1) === ',') {
+                            sqlRequest = sqlRequest.replace(/.$/, ";");
+                        }
+
+                        con.query(sqlRequest, (err) => {
+                            if (err) throw sqlRequest + '\n' + err;
+                            logger.info(this.name + ' OK !');
+                        });
+
+                    } else {
+                        logger.info('Aucun nouvel article pour ' + this.name);
                     }
 
                 });
 
-                if (sql !== 'INSERT INTO articles VALUES ') {
 
-                    if (sql.substr(sql.length - 1, 1) === ',') {
-                        sql = sql.replace(/.$/, ";");
-                    }
-
-                    con.query(sql, (err) => {
-                        if (err) throw sql + '\n' + err;
-                        logger.info(this.name + ' OK !');
-                    });
-                } else {
-                    logger.info('Aucun nouvel article pour ' + this.name);
-                }
-
-            });
-
-
-        } else {
-            logger.info('No articles for ' + this.name);
-        }
+            } else {
+                logger.info('No articles for ' + this.name);
+            }
+        });
 
     }
 
@@ -88,7 +92,7 @@ class LooopingsWebsite extends Website {
         super(id, name, url);
     }
 
-    formatDate(dateParam) {
+    static formatDate(dateParam) {
 
         let date;
 
@@ -100,8 +104,8 @@ class LooopingsWebsite extends Website {
 
             date.setDate(date.getDate() - 1);
 
-            date.setHours(hour.substr(0, 2));
-            date.setMinutes(hour.substr(3, 2));
+            date.setHours(Number(hour.substr(0, 2)));
+            date.setMinutes(Number(hour.substr(3, 2)));
 
         } else if (dateParam.includes('Vandaag')) {
 
@@ -109,8 +113,8 @@ class LooopingsWebsite extends Website {
 
             date = new Date();
 
-            date.setHours(hour.substr(0, 2));
-            date.setMinutes(hour.substr(3, 2));
+            date.setHours(Number(hour.substr(0, 2)));
+            date.setMinutes(Number(hour.substr(3, 2)));
 
         } else {
 
@@ -131,13 +135,15 @@ class LooopingsWebsite extends Website {
 
     fetchArticlesLooopings(index, $) {
 
-        let articleImage = $('#indexVak #indexItem').eq(index).find('a img').attr('src');
+        let articleContainer = $("#indexVak #indexItem").eq(index);
 
-        let articleTitle = $('#indexVak #indexItem').eq(index).find('#indexItemtitel h1 a').text();
+        let articleImage = $(articleContainer).find('a img').attr('src');
 
-        let articleUrl = $('#indexVak #indexItem').eq(index).find('#indexItemfoto a').attr('href');
+        let articleTitle = $(articleContainer).find('#indexItemtitel h1 a').text();
 
-        let articleDateHour = this.formatDate($('#indexVak #indexItem').eq(index).find('#indexItemtitel #dateline .left h4').text());
+        let articleUrl = $(articleContainer).find('#indexItemfoto a').attr('href');
+
+        let articleDateHour = this.formatDate($(articleContainer).find('#indexItemtitel #dateline .left h4').text());
 
 
         return (new Article(1, articleUrl, articleTitle, articleImage, articleDateHour));
@@ -183,8 +189,6 @@ class LooopingsWebsite extends Website {
                     this.pushArticleIntoArticles(this.fetchArticlesLooopings(index, $));
                 });
 
-                return;
-
             });
 
         });
@@ -216,17 +220,18 @@ class WordpressWebsite extends Website {
                 }
 
                 if (body.code === 'rest_post_invalid_page_number') {
-                    throw 'rest_post_invalid_page_number';
+                    reject('rest_post_invalid_page_number');
                 } else {
-                    body.forEach(item => {
+                    for (let i = 0; i < body.length; i++) {
                         try {
-                            this.pushArticleIntoArticles(new Article(this.id, item.link, item.title.rendered, item._embedded['wp:featuredmedia']['0'].source_url, item.modified))
+                            this.pushArticleIntoArticles(new Article(this.id, body[i].link, body[i].title.rendered, body[i]._embedded['wp:featuredmedia']['0'].source_url, body[i].modified));
                         } catch (err) {
-                            reject('Article not complete');
+                            break;
                         }
-                    });
-                    return;
+                    }
                 }
+
+                resolve();
 
             });
 
@@ -235,23 +240,29 @@ class WordpressWebsite extends Website {
     }
 
     async fetchDataAndPopulateArticles() {
-        let iteration = 1;
 
-        while (iteration !== 0) {
+        return new Promise( async () => {
 
-            if (maxPageRefresh && iteration === 6) {
-                break;
+            let iteration = 1;
+
+            while (iteration !== 0) {
+
+                if (maxPageRefresh === iteration) {
+                    break;
+                }
+
+                try {
+                    await this.requester(iteration);
+                    iteration = iteration + 1;
+                } catch(err) {
+                    logger.info(err);
+                    iteration = 0;
+                }
+
             }
 
-            try {
-                await this.requester(iteration);
-                iteration = iteration + 1;
-            } catch(err) {
-                logger.info(err);
-                iteration = 0;
-            }
+        });
 
-        }
     }
 
 }
@@ -270,8 +281,6 @@ class Article {
 
 blackList = ['WDWNT', 'Attractions Magazine', 'Blog Mickey', 'ED92', 'Inside The Magic', 'Coaster 101'];
 
-alreadyDone = false;
-
 function dayRuntime() {
 
     let getCurrentHours = new Date();
@@ -285,7 +294,7 @@ function dayRuntime() {
 
         con.query('SELECT * from website', async (err, results) => {
 
-            maxPageRefresh = true;
+            maxPageRefresh = 6;
 
             if (err) throw err;
 
@@ -298,11 +307,16 @@ function dayRuntime() {
                         websites.push(new WordpressWebsite(item.id, item.name, item.url));
                         break;
                 }
-            })
+            });
 
-            await websiteParsing();
-            logger.info('Version de jour terminée !');
-            dayRuntime();
+            try {
+                await websiteParsing();
+                logger.info('Version de jour terminée !');
+                dayRuntime();
+            } catch (e) {
+                throw err;
+            }
+
 
         });
 
@@ -314,7 +328,7 @@ function nightRuntime() {
 
     con.query('SELECT * from website', async (err, results) => {
 
-        maxPageRefresh = false;
+        maxPageRefresh = null;
 
         if (err) throw err;
 
@@ -342,10 +356,10 @@ async function websiteParsing() {
     return await Promise.all(
         websites.map(async (website) => {
             if (!blackList.includes(website.name)) {
+
                 try {
                     await website.fetchDataAndPopulateArticles();
-                    website.sendArticlesToDb();
-                    return;
+                    await website.sendArticlesToDb();
                 } catch(err) {
                     throw err;
                 }
